@@ -1,22 +1,32 @@
 # NAME
 
-App::mvnutil - It's new $module
+mvnutil - tiny utility command for Apache maven.
 
 # SYNOPSIS
 
-    use App::mvnutil;
+    % mvnutil release
+    % mvnutil docs
+    % mvnutil help
 
 # DESCRIPTION
 
-App::mvnutil is ...
+Apache maven is really awesome framework for managging dependencies. But it's really painful when I release the libraries on maven central repository. I want to release it on the github pages.
 
-# LICENSE
+This command help to manage maven repo on gh-pages!
 
-Copyright (C) Tokuhiro Matsuno.
+# PREPARATION
 
-This library is free software; you can redistribute it and/or modify
-it under the same terms as Perl itself.
+You need to clone your maven repository in ~/.mvn-release/ directory before working.
 
-# AUTHOR
+    git clone git@github.com:tokuhirom/maven.git ~/.mvn-release/
+    git checkout gh-pages
 
-Tokuhiro Matsuno <tokuhirom@gmail.com>
+If you don't have a repository to work, run the following commands
+
+    mkdir -p ~/.mvn-release/
+    cd ~/.mvn-release/
+    git init
+    touch README.md
+    git remote add origin git@github.com:your/repository.git
+    git checkout -b gh-pages
+    git push -u origin gh-pages

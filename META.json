@@ -42,6 +42,7 @@
       },
       "runtime" : {
          "requires" : {
+            "lib::xi" : "0",
             "perl" : "5.008001"
          }
       },
@@ -52,5 +53,16 @@
       }
    },
    "release_status" : "unstable",
+   "resources" : {
+      "bugtracker" : {
+         "web" : "https://github.com/tokuhirom/mvnutil/issues"
+      },
+      "homepage" : "https://github.com/tokuhirom/mvnutil",
+      "repository" : {
+         "type" : "git",
+         "url" : "git://github.com/tokuhirom/mvnutil.git",
+         "web" : "https://github.com/tokuhirom/mvnutil"
+      }
+   },
    "version" : "0.01"
 }
