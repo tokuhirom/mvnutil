@@ -15,6 +15,8 @@ package App::mvnutils {
     use File::pushd;
     use Text::Markdown::Hoedown;
     use Text::MicroTemplate qw(render_mt encoded_string);
+    use File::Zglob;
+    use XML::Simple qw(XMLin);
 
     sub new {
         my $class = shift;
@@ -85,7 +87,8 @@ package App::mvnutils {
         my $pushd = pushd($self->{workdir});
         my $readme_md = path('README.md')->slurp;
         my $md_html = markdown($readme_md);
-        my $html = render_mt(path('_tmpl/index.html')->slurp(), encoded_string($md_html));
+        my @modules = $self->list_modules;
+        my $html = render_mt(path('_tmpl/index.html')->slurp(), encoded_string($md_html), \@modules);
         path('index.html')->spew($html);
     }
 
@@ -130,6 +133,45 @@ package App::mvnutils {
         my $x       = `git tag -l $tag`;
         chomp $x;
         return !!$x;
+    }
+
+    sub list_modules {
+        my $self = shift;
+        my $workdir = $self->{workdir};
+        my @ret;
+        for my $meta (zglob("$workdir/releases/**/maven-metadata.xml")) {
+            my $xml = XMLin(path($meta)->slurp);
+
+#       {
+#         'groupId' => 'me.geso',
+#         'versioning' => {
+#                         'lastUpdated' => '20140711085933',
+#                         'versions' => {
+#                                       'version' => [
+#                                                    '0.0.4',
+#                                                    '0.0.5',
+#                                                    '0.0.6'
+#                                                  ]
+#                                     }
+#                       },
+#         'version' => '0.0.4',
+#         'artifactId' => 'dbinspector'
+#       }
+            # use Data::Dumper; warn Dumper($xml);
+        my $version = $xml->{versioning}{versions}{version};
+            for my $version (ref($version) ? @$version : $version) {
+                my $versiondir = path($meta)->parent()->child($version);
+                my ($pom) = glob("$versiondir/*.pom");
+                $pom or die "Missing pom file in $versiondir/";
+                my $versionxml = XMLin(path($pom)->slurp);
+                unshift @{$xml->{versions}}, $versionxml;
+                if ($xml->{version} eq $version) {
+                    $xml->{description} = $versionxml->{description} or die;
+                }
+            }
+            push @ret, $xml;
+        }
+        return @ret;
     }
 }
 
