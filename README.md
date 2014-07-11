@@ -14,6 +14,10 @@ Apache maven is really awesome framework for managging dependencies. But it's re
 
 This command help to manage maven repo on gh-pages!
 
+# INSTALLATION
+
+    curl -L http://cpanmin.us/ | perl - -nv git://github.com/tokuhirom/mvnutil.git
+
 # PREPARATION
 
 You need to clone your maven repository in ~/.mvn-release/ directory before working.
