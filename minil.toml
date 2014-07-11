@@ -1,0 +1,4 @@
+name = "App-mvnutil"
+# badges = ["travis"]
+module_maker="ModuleBuildTiny"
+
