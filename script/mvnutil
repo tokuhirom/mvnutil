@@ -17,12 +17,15 @@ package App::mvnutils {
     use Text::MicroTemplate qw(render_mt encoded_string);
     use File::Zglob;
     use XML::Simple qw(XMLin);
+    use Cwd;
+    use Log::Minimal;
 
     sub new {
         my $class = shift;
 
         my $self = bless {
             workdir => "$ENV{HOME}/.mvn-release/",
+            project_dir => Cwd::getcwd(),
         }, $class;
         return $self;
     }
@@ -36,6 +39,12 @@ package App::mvnutils {
         $self->$meth(@argv);
     }
 
+    sub cmd {
+        my $self = shift;
+        printf "[CMD] %s\n", join(" ", @_);
+        system(@_);
+    }
+
     sub CMD_docs {
         my $self = shift;
         $self->render_index_html();
@@ -44,6 +53,25 @@ package App::mvnutils {
     sub CMD_help {
         my $self = shift;
         Pod::Usage::pod2usage();
+    }
+
+    sub CMD_javadoc {
+        my $self = shift;
+
+        $self->javadoc();
+    }
+
+    sub javadoc {
+        my ($self) = @_;
+
+        my $workdir = $self->{workdir};
+        (my $groupIdPath = $self->getGroupId) =~ s!\.!/!g;
+        infof("groupId: %s", $self->getGroupId);
+        my $artifactId = $self->getArtifactId;
+        my $version = $self->getVersion;
+        my $destdir = path($workdir, 'javadoc', $groupIdPath, $artifactId, $version);
+        $destdir->mkpath;
+        $self->cmd('mvn', 'javadoc:javadoc', "-DreportOutputDirectory=$destdir");
     }
 
     sub CMD_release {
@@ -58,28 +86,55 @@ package App::mvnutils {
         my $nextver = prompt("Next Release?", default_new_version($curver));
         $nextver =~ /\S/ or die;
 
-        rewrite_version($nextver);
+        $self->rewrite_version($nextver);
 
         # ------------------------------------------------------------------------- 
         # build
 
+
         system("mvn", "-DaltDeploymentRepository=release-repo::default::file:$workdir/releases/",
             'clean', 'deploy');
 
+        $self->javadoc();
+
+        system("git", 'commit', '-a', "Release $nextver");
         system("git", 'tag', $nextver);
         system("git push --tags");
 
         {
             my $pushd = pushd($workdir);
+            $self->render_index_html();
             system("git add .");
             system('git', 'commit', '-m', $nextver);
-            $self->render_index_html();
             system("git push origin gh-pages");
         }
 
-        rewrite_version(Version::Next::next_version($nextver) . '-SNAPSHOT');
+        $self->rewrite_version(Version::Next::next_version($nextver) . '-SNAPSHOT');
 
         exit 0;
+    }
+
+    sub getArtifactId {
+        my $self = shift;
+        my $pom = $self->pom();
+        $pom->{artifactId} // die;
+    }
+
+    sub getGroupId {
+        my $self = shift;
+        my $pom = $self->pom();
+        $pom->{groupId} // die
+    }
+
+    sub getVersion {
+        my $self = shift;
+        my $pom = $self->pom();
+        $pom->{version} // die
+    }
+
+    sub pom {
+        my $self = shift;
+        $self->{pom} //= XMLin(path($self->{project_dir}, 'pom.xml')->slurp);
     }
 
     sub render_index_html {
@@ -101,15 +156,52 @@ package App::mvnutils {
         unless (-f 'pom.xml') {
             die "There is no pom.xml in current directory";
         }
+
+        $self->validate_pom();
+    }
+
+    sub validate_pom {
+        my $self = shift;
+
+        my $pom = $self->pom();
+        $pom->{scm} or do {
+            my $repo = `git remote -v | head -n 1 | awk '{print \$2}'`;
+            $repo =~ s/\n//g;
+            my ($owner, $name) = $repo =~ m!\Agit\@github.com:(.*)/(.*)\.git\z! or die "Unknown github URL: $repo";
+            die join('',
+                "Missing <scm> in your pom.xml:\n\n",
+                "\t<scm>\n",
+                "\t\t<url>https://github.com/$owner/$name/</url>\n",
+                "\t\t<connection>scm:git:git://github.com/${owner}/${name}.git</connection>\n",
+                "\t\t<developerConnection>scm:git:git\@github.com:${owner}/${name}.git</developerConnection>\n",
+                "\t</scm>\n"
+            );
+        };
+
+        $pom->{distributionManagement} or do {
+            die join('',
+                "\t<distributionManagement>\n",
+                "\t\t<repository>\n",
+                "\t\t\t<id>repo</id>\n",
+                "\t\t\t<url>https://github.com/tokuhirom/maven/raw/master/releases</url>\n",
+                "\t\t</repository>\n",
+                "\t\t<snapshotRepository>\n",
+                "\t\t\t<id>snapshot-repo</id>\n",
+                "\t\t\t<url>https://github.com/tokuhirom/maven/raw/master/snapshots</url>\n",
+                "\t\t</snapshotRepository>\n",
+                "\t</distributionManagement>\n",
+            );
+        };
     }
 
 
     sub rewrite_version {
-        my $nextver = shift;
+        my ($self, $nextver) = @_;
 
         my $pom = path('pom.xml')->slurp;
         $pom =~ s!(<version>).*?(</version>)!$1$nextver$2!;
         path('pom.xml')->spew($pom);
+        delete $self->{pom}; # clear cache
     }
 
     sub default_new_version {
@@ -158,15 +250,18 @@ package App::mvnutils {
 #         'artifactId' => 'dbinspector'
 #       }
             # use Data::Dumper; warn Dumper($xml);
-        my $version = $xml->{versioning}{versions}{version};
-            for my $version (ref($version) ? @$version : $version) {
+            my $version = $xml->{versioning}{versions}{version};
+            $version = [$version] unless ref $version;
+            ($xml->{latest}) = reverse sort { version->new($a) <=> version->new($b) } @$version;
+            for my $version (@$version) {
                 my $versiondir = path($meta)->parent()->child($version);
                 my ($pom) = glob("$versiondir/*.pom");
                 $pom or die "Missing pom file in $versiondir/";
                 my $versionxml = XMLin(path($pom)->slurp);
                 unshift @{$xml->{versions}}, $versionxml;
-                if ($xml->{version} eq $version) {
+                if ($xml->{latest} eq $version) {
                     $xml->{description} = $versionxml->{description} or die;
+                    $xml->{primary} = $versionxml or die;
                 }
             }
             push @ret, $xml;
