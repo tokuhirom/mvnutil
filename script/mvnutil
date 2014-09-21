@@ -83,6 +83,7 @@ package App::mvnutils {
             'mvn',
             "-DaltDeploymentRepository=snapshot-repo::default::file:$workdir/snapshots",
             'clean',
+            'findbugs:check',
             'source:jar',
             'javadoc:jar',
             'deploy'
@@ -113,6 +114,7 @@ package App::mvnutils {
             "mvn",
             "-DaltDeploymentRepository=release-repo::default::file:$workdir/releases/",
             'clean',
+            'findbugs:check',
             'source:jar',
             'javadoc:jar',
             'deploy'
