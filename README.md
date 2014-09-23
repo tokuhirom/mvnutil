@@ -1,36 +1,31 @@
-# NAME
+# Mvnutil
 
-mvnutil - tiny utility command for Apache maven.
+TODO: Write a gem description
 
-# SYNOPSIS
+## Installation
 
-    % mvnutil release
-    % mvnutil docs
-    % mvnutil help
+Add this line to your application's Gemfile:
 
-# DESCRIPTION
+```ruby
+gem 'mvnutil'
+```
 
-Apache maven is really awesome framework for managging dependencies. But it's really painful when I release the libraries on maven central repository. I want to release it on the github pages.
+And then execute:
 
-This command help to manage maven repo on gh-pages!
+    $ bundle
 
-# INSTALLATION
+Or install it yourself as:
 
-    curl -L http://cpanmin.us/ | perl - -nv git://github.com/tokuhirom/mvnutil.git
+    $ gem install mvnutil
 
-# PREPARATION
+## Usage
 
-You need to clone your maven repository in ~/.mvn-release/ directory before working.
+TODO: Write usage instructions here
 
-    git clone git@github.com:tokuhirom/maven.git ~/.mvn-release/
-    git checkout gh-pages
+## Contributing
 
-If you don't have a repository to work, run the following commands
-
-    mkdir -p ~/.mvn-release/
-    cd ~/.mvn-release/
-    git init
-    touch README.md
-    git remote add origin git@github.com:your/repository.git
-    git checkout -b gh-pages
-    git push -u origin gh-pages
+1. Fork it ( https://github.com/[my-github-username]/mvnutil/fork )
+2. Create your feature branch (`git checkout -b my-new-feature`)
+3. Commit your changes (`git commit -am 'Add some feature'`)
+4. Push to the branch (`git push origin my-new-feature`)
+5. Create a new Pull Request
