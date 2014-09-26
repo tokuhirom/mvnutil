@@ -1,6 +1,6 @@
 # Mvnutil
 
-TODO: Write a gem description
+Utilities for maven
 
 ## Installation
 
@@ -20,7 +20,7 @@ Or install it yourself as:
 
 ## Usage
 
-TODO: Write usage instructions here
+  $ mvnutil help
 
 ## Contributing
 
