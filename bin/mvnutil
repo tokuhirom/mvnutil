@@ -1,0 +1,356 @@
+#!/usr/bin/env ruby
+
+require 'rubygems'
+require 'thor'
+require 'thor/group'  # This is required -- it's not a bug, it's a feature!
+require 'logger'
+require 'yaml'
+require "highline/import" # ask
+require 'fileutils'
+require "rexml/document"
+
+module Mvnutil
+  class Runner
+    @@logger = Logger.new(STDOUT)
+
+    def initialize(dry_run)
+      @dry_run = dry_run
+    end
+
+    def execute(*cmd)
+      @@logger.info('Running ' + cmd.to_s)
+      unless @dry_run
+        retval = system(*cmd)
+        unless retval
+          raise "ABORT: #{retval}"
+        end
+      end
+    end
+  end
+
+  class Pom
+    def initialize
+      @pom = "#{ Dir.pwd }/pom.xml"
+    end
+
+    def readXML
+      src = File.read(@pom)
+      return Nokogiri::XML(src)
+    end
+
+    def rewriteVersion(version)
+      pom = File.read(@pom).sub(/(<version>).*?(<\/version>)/, "<version>#{version}</version>")
+      File.open(@pom, 'w') {|io|
+        io.write(pom)
+      }
+    end
+
+    def getVersion
+      REXML::Document.new(File.read(@pom)).elements.each('project/version') {|e|
+        return e.text
+      }
+      raise "Cannot get version from #{@pom}"
+    end
+
+    def getArtifactId
+      REXML::Document.new(File.read(@pom)).elements.each('project/artifactId') {|e|
+        return e.text
+      }
+      raise "Cannot get groupId from #{@pom}"
+    end
+
+    def getGroupId
+      REXML::Document.new(File.read(@pom)).elements.each('project/groupId') {|e|
+        return e.text
+      }
+      raise "Cannot get groupId from #{@pom}"
+    end
+  end
+
+  class HtmlRenderer
+    @@logger = Logger.new(STDOUT)
+
+    def initialize(baseDir)
+      @baseDir = baseDir
+      @projects = Project.getProjects(@baseDir)
+    end
+
+    def renderAll
+      self.renderIndex()
+      @projects.each {|project|
+        renderProjectPages(project)
+      }
+    end
+
+    # I want to show project information like README, etc.
+    def renderProjectPages(project)
+      tmpl = File.read("#{@baseDir}/_templates/project.html")
+      erb = ERB.new(tmpl)
+      destdir = "#{@baseDir}/project/#{project.getGroupId}.#{project.getArtifactId}"
+      FileUtils.mkdir_p(destdir)
+      File.open("#{destdir}/index.html", 'w') do |io|
+        io.puts erb.result(binding)
+      end
+    end
+
+    # Rendering index.html
+    def renderIndex
+      projects = @projects
+      tmpl = File.read("#{@baseDir}/_templates/index.html")
+      erb = ERB.new(tmpl)
+      destdir = "#{@baseDir}/"
+      File.open("#{destdir}/index.html", 'w') do |io|
+        io.puts erb.result(binding)
+      end
+    end
+  end
+
+  class Repository
+    def initialize(dir, runner)
+      @repoDir = dir
+      @runner = runner
+    end
+
+    def runGit(*cmd)
+      Dir.chdir(@repoDir) {
+        @runner.execute('git', *cmd)
+      }
+    end
+
+    def add(*args)
+      runGit('add', *args)
+    end
+
+    def commit(*args)
+      runGit('commit', *args)
+    end
+
+    def push(*args)
+      runGit('push', *args)
+    end
+
+    def tag(*args)
+      runGit('tag', *args)
+    end
+
+    def tagExists?(tag)
+      Dir.chdir(@repoDir) {
+        x = `git tag -l #{tag}`
+        return x =~ /\S/
+      }
+    end
+  end
+
+  class Project
+    def self.getProjects(baseDir)
+      projects = []
+      Dir.glob("#{baseDir}/releases/**/maven-metadata.xml") {|filename|
+        projects.push(Project.new(filename))
+      }
+      return projects
+    end
+
+    def initialize(metadataFileName)
+      @doc = REXML::Document.new(File.read(metadataFileName))
+      @file = metadataFileName
+      @releaseVersion = buildReleaseVersion
+    end
+
+    def getGroupId
+      @doc.elements.each('metadata/groupId') {|e|
+        return e.text
+      }
+      raise "Cannot get groupId from #{@file}"
+    end
+
+    def getArtifactId
+      @doc.elements.each('metadata/artifactId') {|e|
+        return e.text
+      }
+      raise "Cannot get artifactId from #{@file}"
+    end
+
+    def getReleaseVersion
+      @releaseVersion
+    end
+
+    def buildReleaseVersion
+      @doc.elements.each('metadata/versioning/release') {|e|
+        return e.text
+      }
+      @doc.elements.each('metadata/versioning/versions') {|e|
+        return e.text
+      }
+      raise "Cannot get releaseVersion from #{@file}"
+    end
+  end
+
+  class Application
+    @@logger = Logger.new(STDOUT)
+
+    def initialize(dry_run)
+      if !File.exists?('pom.xml')
+        puts("There is no pom.xml")
+        exit(1)
+      end
+
+      @pagesDir = "#{ Dir.home }/.mvn-release/"
+      @runner = Runner.new(dry_run)
+      @pagesRepository = Repository.new(@pagesDir, @runner)
+      @projectRepository = Repository.new(File.absolute_path("."), @runner)
+      @workdir = Dir.pwd
+      @htmlRenderer = HtmlRenderer.new(@pagesDir)
+      @pom = Pom.new
+    end
+
+    def snapshot
+      @runner.execute(
+          'mvn',
+          "-DaltDeploymentRepository=snapshot-repo::default::file:#{ @pagesDir }/snapshots",
+          'clean',
+          'findbugs:check',
+          'source:jar',
+          'javadoc:jar',
+          'deploy'
+      )
+
+      version = @pom.getVersion
+      artifactId = @pom.getArtifactId
+
+      @pagesRepository.add('.')
+      @pagesRepository.commit("-m", "Take snapshot for #{artifactId}-#{version}.")
+      @pagesRepository.push('origin', 'gh-pages')
+    end
+
+    def release
+      checkUntrackedFiles()
+
+      curver = @pom.getVersion().gsub(/-SNAPSHOT$/, '')
+      puts "Current version is: #{curver}. Next? "
+      nextver = ask("Next Release?  ") { |q|
+        q.default = nextVersion(curver)
+      }
+      validVersion?(nextver)
+
+      @pom.rewriteVersion(nextver)
+
+      # execute
+      javadocDir = self._javadocDir
+      @runner.execute(
+        "mvn",
+        "-DaltDeploymentRepository=release-repo::default::file:#{@pagesDir}/releases/",
+        "-DreportOutputDirectory=#{javadocDir}",
+        # run
+        'clean',
+        'findbugs:check',
+        'javadoc:javadoc',
+        'source:jar',
+        'javadoc:jar',
+        'deploy'
+      )
+
+      @projectRepository.add('.')
+      @projectRepository.commit('-m', "Release #{nextver}")
+      @projectRepository.tag(nextver)
+      @projectRepository.push()
+      @projectRepository.push('--tags')
+
+      @htmlRenderer.renderAll
+      @pagesRepository.add('.')
+      @pagesRepository.commit("-m", "Release #{@pom.getArtifactId}-#{nextver}.")
+      @pagesRepository.push('origin', 'gh-pages')
+
+      # update gh pages
+      snapshotVersion = nextVersion(nextver) + "-SNAPSHOT"
+      @@logger.info("Next version is #{snapshotVersion}")
+      @pom.rewriteVersion(snapshotVersion)
+      @projectRepository.add('.')
+      @projectRepository.commit('-m', "Preparing for #{snapshotVersion.gsub(/-SNAPSHOT/, '')}")
+      @projectRepository.push()
+    end
+
+    def pages
+      @htmlRenderer.renderAll
+    end
+
+    def javadoc
+      destdir = self._javadocDir
+      @runner.execute('mvn',
+                      'javadoc:javadoc',
+                      "-DreportOutputDirectory=#{ destdir}")
+    end
+
+    def findbugs
+      @runner.execute('mvn', 'findbugs:check')
+    end
+
+    def _javadocDir
+      groupIdPath = @pom.getGroupId.gsub(/\./, '/')
+      artifactId = @pom.getArtifactId
+      version = @pom.getVersion
+      destdir = "#{@pagesDir}/javadoc/#{groupIdPath}/#{artifactId}/#{version}"
+      FileUtils.mkdir_p(destdir)
+      destdir
+    end
+
+    def validVersion?(version)
+      unless version =~ /\A([0-9]+)\.([0-9]+)\.([0-9]+)\z/
+        raise "Invalid version number. It should be '\d+.\d+.\d+' but '#{version}'"
+      end
+    end
+    def nextVersion(version)
+      if version =~ /\A([0-9]+)\.([0-9]+)\.([0-9]+)\z/
+        return "#{$1}.#{$2}.#{$3.to_i+1}"
+      else
+        raise "Invalid version number. It should be '\d+.\d+.\d+' but '#{version}'"
+      end
+    end
+
+    def checkUntrackedFiles
+      unk = `git ls-files -z --others --exclude-standard`
+      if unk =~ /\S/
+        puts "Unknown local files:"
+        puts unk.gsub(/\0/, "\n")
+        puts "Update .gitignore, or git add them"
+      end
+    end
+  end
+
+  class CLI < Thor
+    class_option :dry_run, :type => :boolean, :aliases => '-d', :desc => 'Dry run'
+
+    def initialize(args=[], options={}, config={})
+      super
+      @app = Application.new(self.options['dry_run'])
+    end
+
+    desc 'snapshot', 'Register snapshot to the repo'
+    def snapshot
+      @app.snapshot
+    end
+
+    desc 'release', 'Register release to the repo'
+    def release
+      @app.release
+    end
+
+    desc 'findbugs', 'run findbugs'
+    def findbugs
+      @app.findbugs
+    end
+
+    desc 'pages', 'rendering HTML pages'
+    def pages
+      @app.pages
+    end
+
+    desc 'javadoc', 'rendering javadoc'
+    def javadoc
+      @app.javadoc
+    end
+  end
+end
+
+Mvnutil::CLI.start(ARGV)
+
+__END__
