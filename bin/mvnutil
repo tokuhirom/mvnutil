@@ -224,6 +224,7 @@ module Mvnutil
 
     def release
       checkUntrackedFiles()
+      checkReadme()
 
       curver = @pom.getVersion().gsub(/-SNAPSHOT$/, '')
       puts "Current version is: #{curver}. Next? "
@@ -304,6 +305,20 @@ module Mvnutil
       else
         raise "Invalid version number. It should be '\d+.\d+.\d+' but '#{version}'"
       end
+    end
+
+    def checkReadme
+      ['README.md'].each do |fname|
+        if File.exist?(fname)
+          unless File.read(fname) =~ /travis-ci.org/
+            puts "There is no travis badge in README.md"
+            exit 1
+          end
+          return
+        end
+      end
+      puts "There is no #{fname}"
+      exit 1
     end
 
     def checkUntrackedFiles
