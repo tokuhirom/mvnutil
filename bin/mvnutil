@@ -310,7 +310,9 @@ module Mvnutil
       unk = `git ls-files -z --others --exclude-standard`
       if unk =~ /\S/
         puts "Unknown local files:"
+        puts ""
         puts unk.gsub(/\0/, "\n")
+        puts ""
         puts "Update .gitignore, or git add them"
         exit 1
       end
