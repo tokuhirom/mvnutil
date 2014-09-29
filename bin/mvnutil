@@ -225,6 +225,7 @@ module Mvnutil
     def release
       checkUntrackedFiles()
       checkReadme()
+      checkPom()
 
       curver = @pom.getVersion().gsub(/-SNAPSHOT$/, '')
       puts "Current version is: #{curver}. Next? "
@@ -311,7 +312,11 @@ module Mvnutil
       ['README.md'].each do |fname|
         if File.exist?(fname)
           unless File.read(fname) =~ /travis-ci.org/
+            owner, name = getRepoInfo()
             puts "There is no travis badge in README.md"
+            puts ""
+            puts "[![Build Status](https://travis-ci.org/#{owner}/#{name}.svg?branch=master)](https://travis-ci.org/#{owner}/#{name})"
+            puts ""
             exit 1
           end
           return
@@ -329,6 +334,33 @@ module Mvnutil
         puts unk.gsub(/\0/, "\n")
         puts ""
         puts "Update .gitignore, or git add them"
+        exit 1
+      end
+    end
+
+    def getRepoInfo
+      repo = `git remote -v | head -n 1 | awk '{print \$2}'`.chomp
+      if repo =~ %r!\Agit\@github.com:(.*)/(.*)\.git\z!
+        owner = $1
+        name = $2
+        return owner, name
+      else
+        raise "Unknown github URL: #{repo}"
+      end
+    end
+
+    def checkPom
+      if File.read("pom.xml") !~ /<scm>/
+        owner, name = getRepoInfo()
+        puts <<"..."
+        There is no scm information in pom.xml.
+
+        <scm>
+          <url>https://github.com/#{owner}/#{name}</url>
+          <connection>scm:git:git://github.com/#{owner}/#{name}.git</connection>
+          <developerConnection>scm:git:git@github.com:#{owner}/#{name}.git</developerConnection>
+        </scm>
+...
         exit 1
       end
     end
