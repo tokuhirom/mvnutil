@@ -8,6 +8,7 @@ require 'yaml'
 require "highline/import" # ask
 require 'fileutils'
 require "rexml/document"
+require 'httparty'
 
 module Mvnutil
   class Runner
@@ -319,6 +320,17 @@ module Mvnutil
             puts ""
             exit 1
           end
+
+          if File.read(fname) =~ /\[Build Status\]\((.*?)\)/
+            url = $1
+            response = HTTParty.get(url)
+            puts "#{url} #{response.code}"
+            if response.code == 404
+              puts "#{url} not found. You should enable travis-ci."
+              exit
+            end
+          end
+
           return
         end
       end
